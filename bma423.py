@@ -19,7 +19,7 @@ from machine import Pin
 REG_CHIP_ID = const(0x00)       # Chip identification number.
 REG_INT_STATUS_0 = const(0x1C)  # Interrupt status for features detection.
 REG_INT_STATUS_1 = const(0x1D)  # Interrupt status for data ready.
-REG_STEP_COUNTER_1 = const(0x1F) # For bytes starting here. Number of steps.
+REG_STEP_COUNTER_0 = const(0x1E) # For bytes starting here. Number of steps.
 REG_TEMPERATURE = const(0x22) # Temperature sensor reading: kelvin units.
 REG_INTERNAL_STATUS = const(0x2A) # Error / status bits.
 REG_ACC_CONF = const(0x40)  # Out data rate, bandwidth, read mode.
@@ -34,6 +34,7 @@ REG_INT1_MAP = const(0x56)  # Interrput map for detected features and pin1.
 REG_INT2_MAP = const(0x57)  # Interrput map for detected features and pin2.
 REG_INT_MAP_DATA = const(0x58) # Interrupt map for pin1/2 data events.
 REG_INIT_CTRL = const(0x59) # Initialization register.
+FEATURES_IN_SIZE = const(70) # Size of the features configuration area
 
 # Commands for the REG_CMD register
 REG_CMD_SOFTRESET = const(0xB6)
@@ -43,11 +44,12 @@ class BMA423:
     # 2G, 4G, 8G and 16G. If we want to be able to measure higher
     # max accelerations, the relative precision decreases as we have
     # a fixed 12 bit reading.
-    def __init__(self,i2c,*,acc_range=4):
+    def __init__(self,i2c,*,acc_range=2):
         default_addr = [0x18,0x19] # Changes depending on SDO pin
                                    # pulled to ground or V+
         self.i2c = i2c
         self.myaddr = None
+        self.features_in = bytearray(FEATURES_IN_SIZE)
 
         found_devices = i2c.scan()
         print("BMA423: scan i2c bus:", [hex(x) for x in found_devices])
@@ -68,7 +70,34 @@ class BMA423:
             raise Exception("BMA423 chip ID is not 0x13 as expected. Different sensor connected?")
         print("BMA423: chip correctly identified.")
 
-        # Load ASCI configuration.
+        # Load ASIC configuration.
+        self.load_features_config()
+
+        # Configure device.
+        self.set_reg(REG_PWR_CTL,0x04) # acquisition enabled, aux disabled.
+
+        # Enable performance mode: in this mode, the data sampling happens
+        # at the specified frequency interval continuously.
+        acc_bwp = 0x01 # acc_perf_mode = 1, average of 2 samples.
+        acc_ord = 0x08 # 100 hz sampling rate
+        self.set_reg(REG_ACC_CONF,acc_ord | (acc_bwp<<4))
+
+        # Enable power saving: when data is not being sampled, slow clock
+        # is active: more delay.
+        self.set_reg(REG_PWR_CONF,0x03) # adv_power_save + fifo_self_wakeup.
+
+        # Enable 4G range.
+        self.set_range(acc_range)
+
+        # Enable steps detection.
+        self.read_features_in()
+        self.features_in[0x3B] |= 0x10 # Enable step counter.
+        self.write_features_in()
+
+    # Prepare the device to load the binary configuration in the
+    # bma423conf.bin file (data from BOSH). This step is required for
+    # features detection.
+    def load_features_config(self):
         self.set_reg(REG_PWR_CONF,0x00)  # Disable adv_power_save.
         time.sleep_us(500)               # Wait time synchronization.
         self.set_reg(REG_INIT_CTRL,0x00) # Prepare for loading configuration.
@@ -89,32 +118,34 @@ class BMA423:
                     status)
         print("BMA423: device initialized successfully. Configuring...")
 
-        # Read the FEATURES_IN address. This is a 64 byte block in
-        # ASIC memory whose address is set in the 0x5b/0x5c (memory
-        # offset LSB/MSB) reserved registers after a correct
-        # initialization.
-        # We will need it to activate features and steps detection.
-        lsb = self.get_reg(0x5b)
-        msb = self.get_reg(0x5c)
-        self.features_in_addr = (lsb | msb << 4)*2
-        print("BMA423: FEATURES_IN offset in ASIC memory:",
-            self.features_in_addr)
+    # Write to the ASIC memory. This is useful to set the device
+    # features configuration.
+    #
+    # Writing / reading from ASIC works setting two registers that
+    # point to the memory area(0x5B/5C), and then reading/writing from/to
+    # the register 0x5E. Note that while normally writing / reading
+    # to a given register will write bytes to successive registers, in
+    # the case of 0x5E it works like a "port", so we keep reading
+    # or writing from successive parts of the ASIC memory.
+    def write_config_mem(self,idx,buf):
+        # The index of the half-word (so index/2) must
+        # be placed into this two undocumented registers
+        # 0x5B and 0x5C. Data goes in 0xE.
+        # Thanks for the mess, BOSH!
+        self.set_reg(0x5b,(idx//2)&0xf) # Set LSB (bits 3:0)
+        self.set_reg(0x5c,(idx//2)>>4)  # Set MSB (bits 11:5)
+        self.set_reg(0x5e,buf)
 
-        # Configure device.
-        self.set_reg(REG_PWR_CTL,0x04) # acquisition enabled, aux disabled.
+    # see write_config_mem().
+    def read_config_mem(self,idx,count):
+        self.set_reg(0x5b,(idx//2)&0xf) # Set LSB (bits 3:0)
+        self.set_reg(0x5c,(idx//2)>>4)  # Set MSB (bits 11:5)
+        return self.get_reg(0x5e,count)
 
-        # Enable performance mode: in this mode, the data sampling happens
-        # at the specified frequency interval continuously.
-        acc_bwp = 0x01 # acc_perf_mode = 1, average of 2 samples.
-        acc_ord = 0x08 # 100 hz sampling rate
-        self.set_reg(REG_ACC_CONF,acc_ord | (acc_bwp<<4))
-
-        # Enable power saving: when data is not being sampled, slow clock
-        # is active: more delay.
-        self.set_reg(REG_PWR_CONF,0x03) # adv_power_save + fifo_self_wakeup.
-    
-        # Enable 4G range.
-        self.set_range(acc_range)
+    # Read the steps counter.
+    def get_steps(self):
+        data = self.get_reg(REG_STEP_COUNTER_0,4)
+        return data[0] | data[1]<<8 | data[2]<<16 | data[3]<<24
 
     # The BMA423 features detection requires that we transfer a binary
     # blob via the features configuration register (and other two undocumented
@@ -129,13 +160,7 @@ class BMA423:
         buf = bytearray(8) # Binary config is multiple of 8 in len.
         idx = 0
         while f.readinto(buf,8) == 8:
-            # The index of the half-word (so index/2) must
-            # be placed into this two undocumented registers
-            # 0x5B and 0x5C. Data goes in 0xE.
-            # Thanks for the mess, BOSH!
-            self.set_reg(0x5b,(idx//2)&0xf) # Set LSB (bits 3:0)
-            self.set_reg(0x5c,(idx//2)>>4)  # Set MSB (bits 11:5)
-            self.set_reg(0x5e,buf)
+            self.write_config_mem(idx,buf)
             idx += 8
         print("Done: total transfer: ", idx)
 
@@ -144,9 +169,7 @@ class BMA423:
         idx = 0
         f.seek(0)
         while f.readinto(buf,8) == 8:
-            self.set_reg(0x5b,(idx//2)&0xf) # Set LSB (bits 3:0)
-            self.set_reg(0x5c,(idx//2)>>4)  # Set MSB (bits 11:5)
-            content = self.get_reg(0x5e,8)
+            content = self.read_config_mem(idx,8)
             idx += 8
             if content != buf:
                 raise Exception("Feature config data mismatch at",idx)
@@ -278,6 +301,12 @@ class BMA423:
         else:
             self.i2c.writeto_mem(self.myaddr,register,bytes([value]))
 
+    def read_features_in(self):
+        self.i2c.readfrom_mem_into(self.myaddr,0x5E,self.features_in)
+
+    def write_features_in(self):
+        self.i2c.writeto_mem(self.myaddr,0x5E,self.features_in)
+
 # Example usage and quick test to see if your device is working.
 if  __name__ == "__main__":
     from machine import SoftI2C, Pin
@@ -291,5 +320,8 @@ if  __name__ == "__main__":
     sensor = BMA423(i2c)
     sensor.enable_interrupt(2,Pin(14,Pin.IN),mycallback,["step"])
     while True:
-        print("(x,y,z),temp",sensor.get_xyz(),sensor.get_temperature())
+        print("(x,y,z),temp,steps",
+            sensor.get_xyz(),
+            sensor.get_temperature(),
+            sensor.get_steps())
         time.sleep(.1)
