@@ -1,11 +1,5 @@
 # BMA423 simple driver.
 #
-# DISCLAIMER: The BMA423 chip has tons of features. In this driver the
-# goal is not to support everything, but the minimum set of useful things
-# that most users will want to play with: raw XYZ readings and interrupts
-# for steps and for reading changes. For more advanced stuff, check the
-# datasheet or use a more complex driver.
-#
 # Copyright (C) 2024 Salvatore Sanfilippo -- All Rights Reserved
 # This code is released under the MIT license
 # https://opensource.org/license/mit/
