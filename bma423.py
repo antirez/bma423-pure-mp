@@ -68,6 +68,7 @@ class BMA423:
             raise Exception("BMA423 chip ID is not 0x13 as expected. Different sensor connected?")
         print("BMA423: chip correctly identified.")
 
+        # Load ASCI configuration.
         self.set_reg(REG_PWR_CONF,0x00)  # Disable adv_power_save.
         time.sleep_us(500)               # Wait time synchronization.
         self.set_reg(REG_INIT_CTRL,0x00) # Prepare for loading configuration.
@@ -87,6 +88,17 @@ class BMA423:
                 raise Exception("Timeout during init, internal_status: ",
                     status)
         print("BMA423: device initialized successfully. Configuring...")
+
+        # Read the FEATURES_IN address. This is a 64 byte block in
+        # ASIC memory whose address is set in the 0x5b/0x5c (memory
+        # offset LSB/MSB) reserved registers after a correct
+        # initialization.
+        # We will need it to activate features and steps detection.
+        lsb = self.get_reg(0x5b)
+        msb = self.get_reg(0x5c)
+        self.features_in_addr = (lsb | msb << 4)*2
+        print("BMA423: FEATURES_IN offset in ASIC memory:",
+            self.features_in_addr)
 
         # Configure device.
         self.set_reg(REG_PWR_CTL,0x04) # acquisition enabled, aux disabled.
@@ -277,7 +289,7 @@ if  __name__ == "__main__":
 
     i2c = SoftI2C(scl=11,sda=10)
     sensor = BMA423(i2c)
-    sensor.enable_interrupt(1,Pin(14,Pin.IN),mycallback,["step"])
+    sensor.enable_interrupt(2,Pin(14,Pin.IN),mycallback,["step"])
     while True:
         print("(x,y,z),temp",sensor.get_xyz(),sensor.get_temperature())
         time.sleep(.1)
