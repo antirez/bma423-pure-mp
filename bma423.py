@@ -139,7 +139,7 @@ class BMA423:
         self.write_features_in()
 
     # Prepare the device to load the binary configuration in the
-    # bma423conf.bin file (data from BOSH). This step is required for
+    # bma423conf.bin file (data from Bosch). This step is required for
     # features detection.
     def load_features_config(self):
         saved_pwr_conf = self.get_reg(REG_PWR_CONF) # To restore it later.
@@ -177,7 +177,7 @@ class BMA423:
         # The index of the half-word (so index/2) must
         # be placed into this two undocumented registers
         # 0x5B and 0x5C. Data goes in 0xE.
-        # Thanks for the mess, BOSH!
+        # Thanks for the mess, Bosch!
         self.set_reg(0x5b,(idx//2)&0xf) # Set LSB (bits 3:0)
         self.set_reg(0x5c,(idx//2)>>4)  # Set MSB (bits 11:5)
         self.set_reg(0x5e,buf)
