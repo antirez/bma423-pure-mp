@@ -1,4 +1,4 @@
-# BMA423 simple driver.
+# BMA423 driver that aims to support features detection.
 #
 # Copyright (C) 2024 Salvatore Sanfilippo -- All Rights Reserved
 # This code is released under the MIT license
