@@ -70,16 +70,24 @@ class BMA423:
         self.set_accelerometer_perf(True)
         self.set_accelerometer_avg(2)
         self.set_accelerometer_freq(100)
-
-        # Enable power saving: when data is not being sampled, slow clock
-        # is active: more delay.
-        self.set_reg(REG_PWR_CONF,0x03) # adv_power_save + fifo_self_wakeup.
+        self.set_advanced_power_save(False,False)
 
         # Enable the default range.
         self.set_range(acc_range)
 
         # Enable features detection.
         self.enable_features_detection("step-count")
+
+    # Enable or disable advanced power saving (ADP).
+    #
+    # When data is not being sampled, power saving mode slows down the
+    # clock and makes latency higher.
+    # Fifo self wakeup controls if the FIFO works when ADP is enabled.
+    # Step counting less reliable if APS is enabled (note of the implementator).
+    def set_advanced_power_save(self,adp=False,fifo_self_wakeup=False):
+        adp = int(adp) & 1
+        fifo_self_wakeup = (int(fifo_self_wakeup) & 1) << 1
+        self.set_reg(REG_PWR_CONF,adp|fifo_self_wakeup)
 
     # Enable/Disable accelerometer and aux sensor.
     def enable_accelerometer(self,*,acc=True,aux=False):
@@ -91,10 +99,9 @@ class BMA423:
     # Enable/Disable performance mode. When performance mode is enabled
     # the accelerometer performs continuous sampling at the specified
     # sampling rate.
-    def set_accelerometer_perf(self,mode):
+    def set_accelerometer_perf(self,perf_mode):
         val = self.get_reg(REG_ACC_CONF)
-        perf_mode = (1<<7) if mode else 0 # Perf mode is bit 7
-        val = (val & 0b01111111) | perf_mode
+        val = (val & 0b01111111) | (int(perf_mode) << 7)
         self.set_reg(REG_ACC_CONF,val)
 
     # Set average mode. The mode selected depends on the fact performance
@@ -249,7 +256,7 @@ class BMA423:
             if e in feature_bits:
                 feature_map |= (1 << feature_bits[e])
             elif e in data_bits:
-                data_map |= data_bits[e][pin-1]
+                data_map |= data_bits[e][chip_pin-1]
             else:
                 raise Exception(f"Unknown event {e} when enabling interrupt.")
         if feature_map != 0:
@@ -356,7 +363,7 @@ if  __name__ == "__main__":
 
     i2c = SoftI2C(scl=11,sda=10)
     sensor = BMA423(i2c)
-    sensor.enable_interrupt(2,Pin(14,Pin.IN),mycallback,["step"])
+    sensor.enable_interrupt(1,Pin(14,Pin.IN),mycallback,["data"])
     while True:
         print("(x,y,z),temp,steps",
             sensor.get_xyz(),
