@@ -56,27 +56,26 @@ class BMA423:
         print("BMA423: device with matching address found at",hex(self.myaddr))
 
         # Device initialization.
-        self.set_reg(REG_CMD,REG_CMD_SOFTRESET) # Reset the chip.
-        time.sleep(1)
-
+        self.reset()
         chip_id = self.get_reg(REG_CHIP_ID)
         if chip_id != 0x13:
             raise Exception("BMA423 chip ID is not 0x13 as expected. Different sensor connected?")
         print("BMA423: chip correctly identified.")
 
-        # Load ASIC configuration.
-        self.load_features_config()
+        # Set default parameters. By default we enable the accelerometer
+        # so that the user can read the acceleration vector from the
+        # device without much setup work.
         self.enable_accelerometer(acc=True,aux=False)
         self.set_accelerometer_perf(True)
         self.set_accelerometer_avg(2)
         self.set_accelerometer_freq(100)
         self.set_advanced_power_save(False,False)
-
-        # Enable the default range.
         self.set_range(acc_range)
 
-        # Enable features detection.
-        self.enable_features_detection("step-count")
+    # Soft reset using the commands register.
+    def reset(self):
+        self.set_reg(REG_CMD,REG_CMD_SOFTRESET) # Reset the chip.
+        time.sleep(1) # Datasheet claims we need to wait that much. I know.
 
     # Enable or disable advanced power saving (ADP).
     #
@@ -143,6 +142,7 @@ class BMA423:
     # bma423conf.bin file (data from BOSH). This step is required for
     # features detection.
     def load_features_config(self):
+        saved_pwr_conf = self.get_reg(REG_PWR_CONF) # To restore it later.
         self.set_reg(REG_PWR_CONF,0x00)  # Disable adv_power_save.
         time.sleep_us(500)               # Wait time synchronization.
         self.set_reg(REG_INIT_CTRL,0x00) # Prepare for loading configuration.
@@ -161,7 +161,8 @@ class BMA423:
             if wait_epoch == 20:
                 raise Exception("Timeout during init, internal_status: ",
                     status)
-        print("BMA423: device initialized successfully. Configuring...")
+        print("BMA423: features engine initialized successfully.")
+        self.set_reg(REG_PWR_CONF,saved_pwr_conf)
 
     # Write to the ASIC memory. This is useful to set the device
     # features configuration.
@@ -364,6 +365,11 @@ if  __name__ == "__main__":
     i2c = SoftI2C(scl=11,sda=10)
     sensor = BMA423(i2c)
     sensor.enable_interrupt(1,Pin(14,Pin.IN),mycallback,["data"])
+
+    # Enable steps counting
+    sensor.load_features_config()
+    sensor.enable_features_detection("step-count")
+
     while True:
         print("(x,y,z),temp,steps",
             sensor.get_xyz(),
