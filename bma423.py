@@ -8,6 +8,7 @@
 # https://www.mouser.com/datasheet/2/783/BST-BMA423-DS000-1509600.pdf
 
 from machine import Pin
+import time
 
 # Registers
 REG_CHIP_ID = const(0x00)       # Chip identification number.
