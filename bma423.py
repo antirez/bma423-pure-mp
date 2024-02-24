@@ -66,26 +66,70 @@ class BMA423:
 
         # Load ASIC configuration.
         self.load_features_config()
-
-        # Configure device.
-        self.set_reg(REG_PWR_CTL,0x04) # acquisition enabled, aux disabled.
-
-        # Enable performance mode: in this mode, the data sampling happens
-        # at the specified frequency interval continuously.
-        acc_bwp = 0x01 # acc_perf_mode = 1, average of 2 samples.
-        acc_ord = 0x08 # 100 hz sampling rate
-        self.set_reg(REG_ACC_CONF,acc_ord | (acc_bwp<<4))
+        self.enable_accelerometer(acc=True,aux=False)
+        self.set_accelerometer_perf(True)
+        self.set_accelerometer_avg(2)
+        self.set_accelerometer_freq(100)
 
         # Enable power saving: when data is not being sampled, slow clock
         # is active: more delay.
         self.set_reg(REG_PWR_CONF,0x03) # adv_power_save + fifo_self_wakeup.
 
-        # Enable 4G range.
+        # Enable the default range.
         self.set_range(acc_range)
 
-        # Enable steps detection.
+        # Enable features detection.
+        self.enable_features_detection("step-count")
+
+    # Enable/Disable accelerometer and aux sensor.
+    def enable_accelerometer(self,*,acc=True,aux=False):
+        val = 0
+        if acc: val |= 0x4  # acc_en bit, enable accelerometer acquisition.
+        if aux: val |= 0x1  # aux_en bit, enable aux sensor.
+        self.set_reg(REG_PWR_CTL,val)
+
+    # Enable/Disable performance mode. When performance mode is enabled
+    # the accelerometer performs continuous sampling at the specified
+    # sampling rate.
+    def set_accelerometer_perf(self,mode):
+        val = self.get_reg(REG_ACC_CONF)
+        perf_mode = (1<<7) if mode else 0 # Perf mode is bit 7
+        val = (val & 0b01111111) | perf_mode
+        self.set_reg(REG_ACC_CONF,val)
+
+    # Set average mode. The mode selected depends on the fact performance
+    # mode is enabled/disabled.
+    # Valid values:
+    # perf mode on:  0 = osr4, 1 = osr2, 2 = normal, 3 = cic.
+    # perf mode off: 0 = avg1, 1 = avg2, 2 = avg4, 3 = avg8
+    #                4 = avg16, 5 = avg32, 6 = avg64, 7 = avg128.
+    def set_accelerometer_avg(self,avg_mode):
+        val = self.get_reg(REG_ACC_CONF)
+        val = (val & 0b10001111) | avg_mode << 4
+        self.set_reg(REG_ACC_CONF,val)
+
+    # Set accelerometer sampling frequency, either as a frequency in
+    # hz that we convert using a table, or as immediate value if the
+    # user wants to select one of the low frequency modes (see datasheet).
+    def set_accelerometer_freq(self,freq):
+        table = {25:6, 50:7, 100:8, 200:9, 400:10, 800:11, 1600:12}
+        if freq in table:
+            freq = table[freq]
+        elif freq == 0 or freq >= 0x0d:
+            raise Exception("Invalid frequency or raw value")
+        val = self.get_reg(REG_ACC_CONF)
+        val = (val & 0b11110000) | freq
+        self.set_reg(REG_ACC_CONF,val)
+
+    # Write in the FEATURES-IN configuration to enable specific
+    # features.
+    def enable_features_detection(self,*features):
         self.read_features_in()
-        self.features_in[0x3B] |= 0x10 # Enable step counter.
+        for f in features:
+            if f == "step-count":
+                self.features_in[0x3B] |= 0x10 # Enable step counter.
+            else:
+                raise Exception("Unrecognized feature name",f)
         self.write_features_in()
 
     # Prepare the device to load the binary configuration in the
