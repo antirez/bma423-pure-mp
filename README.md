@@ -16,11 +16,11 @@ interrupts, to provide a cleaner API, documentation and a few examples.
 Transfer files to the device. Note that **:** at the end is needed, or
 mpremote does a mess and will copy all the files to the last file name.
 
-    mpremote bma423.py bma423config.bin :
+    mpremote cp bma423.py bma423conf.bin :
 
 Then upload an example as `main.py` like this:
 
-    mpremote example_you_want.py :main.py
+    mpremote cp example_you_want.py :main.py
 
 Then reset the device and look at the output in your serial log with:
 
